@@ -106,6 +106,8 @@ public class NotificationFeature(
 
                 if (message.InfoType is NotificationInfoType.New && filter is NotificationFilter.ToastFeed)
                 {
+                    if (!device.DeviceSettings.ShowNotificationToast) return;
+
                     if (device.DeviceSettings.IgnoreWindowsApps && await IsAppActiveAsync(message.AppName!)) return;
 
                     await platformNotificationHandler.ShowRemoteNotification(message, device.Id);
