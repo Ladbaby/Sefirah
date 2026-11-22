@@ -38,9 +38,18 @@ public class SyncRootRegistrar(
     {
         // Stage 1: Setup
         //--------------------------------------------------------------------------------------------
-        // The client folder (syncroot) must be indexed in order for states to properly display
+        // Deliberately mark the sync root NotContentIndexed.
+        //
+        // The previous behaviour cleared this flag on the belief that states need indexing to
+        // display. They do not; the shell gets them from the sync root registration itself. What
+        // indexing actually did was make Windows Search read every placeholder, and because the
+        // hydration policy is Full, each read downloaded the entire file from the phone. On a
+        // device with a large photo/video library that is a full mirror of remote storage.
         var clientDirectory = new DirectoryInfo(command.Directory);
-        clientDirectory.Attributes &= ~System.IO.FileAttributes.NotContentIndexed;
+        if (!clientDirectory.Attributes.HasFlag(System.IO.FileAttributes.NotContentIndexed))
+        {
+            clientDirectory.Attributes |= System.IO.FileAttributes.NotContentIndexed;
+        }
 
         var id = GetId(command.AccountId);
         var contextBuffer = CryptographicBuffer.CreateFromByteArray(StructBytes.ToBytes(context));

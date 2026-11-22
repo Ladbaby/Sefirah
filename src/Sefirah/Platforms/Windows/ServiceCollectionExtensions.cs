@@ -43,7 +43,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ShellRegistrar>();
         services.AddHostedService<ShellWorker>();
 
-        services.AddSingleton<SyncProviderWorker>();
+        // Hosted, not a plain singleton: this service re-attaches the sync engine to sync roots
+        // registered by a previous run. As a singleton its ExecuteAsync was never invoked, so after
+        // an app restart the mounts in RemoteDevices had no provider and rendered as broken until
+        // the phone reconnected and re-sent its SftpServerInfo.
+        services.AddHostedService<SyncProviderWorker>();
         services.AddSingleton<IPhoneLineService, PhoneLineService>();
         services.AddSingleton<BluetoothRadioManager>();
         services.AddSingleton<IBluetoothPairingService, BluetoothPairingService>();
