@@ -25,6 +25,16 @@ public class DiscoveryService(
     private List<IPEndPoint> broadcastEndpoints = [];
     private const int DiscoveryPort = 5149;
 
+    /// <summary>
+    /// How often to re-announce. The phone only re-announces while it believes nothing is
+    /// connected, and after a drop it has nothing left to react to, so the desktop has to keep
+    /// advertising for either side to notice the other is back. A single announcement at startup
+    /// leaves both peers stranded once the connection is lost.
+    /// </summary>
+    private static readonly TimeSpan BroadcastInterval = TimeSpan.FromSeconds(20);
+
+    private CancellationTokenSource? broadcastCts;
+
     public UdpBroadcast? BroadcastMessage { get; private set; }
 
     public async Task StartDiscoveryAsync()
@@ -79,6 +89,7 @@ public class DiscoveryService(
                 udpClient.Socket.EnableBroadcast = true;
                 logger.Info($"UDP Client connected successfully {port}");
                 BroadcastDeviceInfoAsync(BroadcastMessage);
+                StartPeriodicBroadcast();
             }
             else
             {
@@ -115,6 +126,40 @@ public class DiscoveryService(
         }
     }
 
+    /// <summary>
+    /// Keeps re-announcing this device on an interval so a phone that dropped, or that started
+    /// while the desktop was already running, can find it again without a manual reconnect.
+    /// </summary>
+    private void StartPeriodicBroadcast()
+    {
+        broadcastCts?.Cancel();
+        broadcastCts = new CancellationTokenSource();
+        var token = broadcastCts.Token;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var timer = new PeriodicTimer(BroadcastInterval);
+                while (await timer.WaitForNextTickAsync(token))
+                {
+                    var broadcast = BroadcastMessage;
+                    if (broadcast is null || udpClient is null) continue;
+
+                    BroadcastDeviceInfoAsync(broadcast);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // shutting down
+            }
+            catch (Exception ex)
+            {
+                logger.Warn($"Periodic broadcast stopped: {ex.Message}", ex);
+            }
+        }, token);
+    }
+
     public async void OnReceived(EndPoint endpoint, byte[] buffer, long offset, long size)
     {
         try
@@ -137,6 +182,10 @@ public class DiscoveryService(
     {
         try
         {
+            broadcastCts?.Cancel();
+            broadcastCts?.Dispose();
+            broadcastCts = null;
+
             mdnsService.DiscoveredMdnsService -= OnDiscoveredMdnsService;
             mdnsService.UnAdvertiseService();
             udpClient?.Dispose();
