@@ -43,6 +43,18 @@ internal static class LinuxTrayIconLoader
         return (size, size, pixels);
     }
 
-    public static string GetTrayIconPath()
-        => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "Assets", "Icons", "SefirahDark.ico"));
+    public static string GetTrayIconPath(bool useDarkPanel)
+        => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "Assets", "Icons", GetTrayIconFileName(useDarkPanel)));
+
+    private static string GetTrayIconFileName(bool useDarkPanel)
+    {
+        // The glyph polarity is inverted from the panel: SefirahDark.ico draws a white glyph
+        // (for dark panels), SefirahLight.ico draws a dark glyph (for light panels).
+        var preferred = useDarkPanel ? "SefirahDark.ico" : "SefirahLight.ico";
+        var fallback = useDarkPanel ? "SefirahLight.ico" : "SefirahDark.ico";
+
+        return File.Exists(Path.Combine(AppContext.BaseDirectory, "Assets", "Icons", preferred))
+            ? preferred
+            : fallback;
+    }
 }
