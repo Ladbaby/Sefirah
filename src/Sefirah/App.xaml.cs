@@ -234,8 +234,15 @@ public partial class App : Application
         if (Ioc.Default.GetService<ISystemTrayService>() is not { IsAvailable: true })
             return;
 
+#if WINDOWS
+        // Windows can hide the window and keep running in the tray.
         args.Handled = true;
         MainWindow.AppWindow.Hide();
+#else
+        // Uno's desktop AppWindow.Hide() is a no-op, so cancelling the close here would leave a
+        // window that cannot be dismissed. Quit instead; the tray "Exit" item shares this path.
+        TrayExitApplication();
+#endif
     }
 
     public static void TrayStartScrcpy()
@@ -258,7 +265,9 @@ public partial class App : Application
                 return;
             }
 
-            MainWindow.AppWindow.Hide();
+            // Uno's desktop AppWindow.Hide() is a no-op, so minimize rather than hiding —
+            // otherwise the tray click would leave a window that can never be restored.
+            presenter?.Minimize();
         });
     }
 
