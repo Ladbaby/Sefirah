@@ -25,6 +25,13 @@ public partial class App : Application
     public static nint WindowHandle { get; private set; }
     public static Window MainWindow { get; private set; } = null!;
     protected IHost? Host { get; private set; }
+
+#if !WINDOWS
+    /// <summary>
+    /// True while the main window is closed to the tray and the host keeps running headless.
+    /// </summary>
+    public static bool IsWindowClosedToTray { get; private set; }
+#endif
     
     // Track open DeviceSettingsWindow instances
     private static readonly Dictionary<string, DeviceSettingsWindow> DeviceSettingsWindows = [];
@@ -40,6 +47,13 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+#if !WINDOWS
+        // Uno's Skia/X11 host exits its run loop once the last native window is gone
+        // (X11ApplicationHost.ShouldExit -> X11XamlRootHost.AllWindowsDone). Opting into
+        // explicit shutdown keeps the process alive so the app can live in the tray after
+        // the window is closed; TrayExitApplication is then the only way out.
+        DispatcherShutdownMode = DispatcherShutdownMode.OnExplicitShutdown;
+#endif
         _ = ActivateAsync();
 
         async Task ActivateAsync()
@@ -226,6 +240,44 @@ public partial class App : Application
         MainWindow.Closed += Window_Closed;
     }
 
+#if !WINDOWS
+    private void UnhookWindowEvents(Window window)
+        => window.Closed -= Window_Closed;
+
+    /// <summary>
+    /// Rebuilds the main window after it was closed to the tray, restoring the last displayed page.
+    /// </summary>
+    private void RecreateMainWindowIfNeeded()
+    {
+        if (!IsWindowClosedToTray)
+            return;
+
+        IsWindowClosedToTray = false;
+
+        var previousFrame = MainWindow?.Content as Frame;
+        var lastPageType = previousFrame?.CurrentSourcePageType ?? typeof(MainPage);
+
+        var window = new Window
+        {
+            Title = "Sefirah"
+        };
+        MainWindow = window;
+        window.SetWindowIcon();
+
+        if (window.AppWindow.Presenter is OverlappedPresenter presenter)
+        {
+            presenter.PreferredMinimumWidth = 360;
+            presenter.PreferredMinimumHeight = 400;
+        }
+
+        if (EnsureWindowIsInitialized() is Frame frame)
+            frame.Navigate(lastPageType, null, new SuppressNavigationTransitionInfo());
+
+        HookEventsForWindow();
+        Ioc.Default.GetService<IAppThemeModeService>()?.ManageAppearance(MainWindow);
+    }
+#endif
+
     private void Window_Closed(object sender, WindowEventArgs args)
     {
         if (!HandleClosedEvents)
@@ -239,9 +291,18 @@ public partial class App : Application
         args.Handled = true;
         MainWindow.AppWindow.Hide();
 #else
-        // Uno's desktop AppWindow.Hide() is a no-op, so cancelling the close here would leave a
-        // window that cannot be dismissed. Quit instead; the tray "Exit" item shares this path.
-        TrayExitApplication();
+        if (!IsWindowClosedToTray)
+        {
+            // Let the native window be destroyed. With OnExplicitShutdown the host keeps running,
+            // so this is a genuine close-to-tray rather than a cancelled close.
+            IsWindowClosedToTray = true;
+            UnhookWindowEvents(MainWindow);
+
+            var closedWindow = MainWindow;
+            // Detach content so the cached Frame/view models are not torn down with the window;
+            // the next ShowMainWindow attaches a fresh Frame to a new Window.
+            closedWindow.Content = null;
+        }
 #endif
     }
 
@@ -273,6 +334,10 @@ public partial class App : Application
 
     public static void ShowMainWindow()
     {
+#if !WINDOWS
+        // The window may have been closed to the tray; recreate it before showing.
+        (Current as App)?.RecreateMainWindowIfNeeded();
+#endif
         var presenter = MainWindow.AppWindow.Presenter as OverlappedPresenter;
         if (presenter?.State is OverlappedPresenterState.Minimized)
             presenter.Restore();
